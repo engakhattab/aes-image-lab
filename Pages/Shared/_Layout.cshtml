@@ -1,0 +1,52 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - AES Image Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Ubuntu:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+    <div class="bg-fx" aria-hidden="true">
+        <div class="blob b1"></div>
+        <div class="blob b2"></div>
+        <div class="grid-fx"></div>
+    </div>
+
+    <header class="site-header">
+        <div class="container header-bar">
+            <a class="brand" asp-area="" asp-page="/Index">
+                <span class="brand-mark"></span>
+                AES Image Lab
+            </a>
+            <nav class="header-nav" aria-label="Sections">
+                <button type="button" data-goto="encrypt">Encrypt</button>
+                <button type="button" data-goto="decrypt">Decrypt</button>
+                <button type="button" data-goto="compare">Compare</button>
+                <button type="button" data-scroll="#modes">How it works</button>
+            </nav>
+            <span class="header-pill">AES &middot; .NET 10</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <main role="main">
+            @RenderBody()
+        </main>
+    </div>
+
+    <footer class="site-footer">
+        <div class="container">
+            <span>&copy; 2026 AES Image Lab &mdash; SCE 422e course project</span>
+            <span>ASP.NET Core 10 &middot; System.Security.Cryptography</span>
+        </div>
+    </footer>
+
+    <div class="toast-host" id="toasts" aria-live="polite"></div>
+
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

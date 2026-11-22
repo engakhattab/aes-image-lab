@@ -1,0 +1,366 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Encrypt images with AES";
+
+    var modes = new (string Name, string Tag, string Tone, string Desc)[]
+    {
+        ("ECB", "Leaks patterns", "warn", "Each 16-byte block is encrypted on its own, so identical blocks give identical ciphertext."),
+        ("CBC", "Hides patterns", "ok", "Each block is XORed with the previous ciphertext block first. Uses a random IV."),
+        ("CTR", "Hides patterns", "ok", "AES encrypts a counter and the keystream is XORed with the pixels. Built by hand on AES-ECB."),
+    };
+    var keySizes = new (int Bits, int Rounds)[] { (128, 10), (192, 12), (256, 14) };
+}
+@Html.AntiForgeryToken()
+
+<section class="hero">
+    <div class="hero-badge"><span class="dot"></span>SCE 422e Course Project &middot; AES (FIPS-197)</div>
+    <h1>Encrypt images with <span class="grad">AES</span>.<br />See what each <span class="grad">mode</span> gives away.</h1>
+    <p class="hero-sub">Drop in an image, pick ECB, CBC or CTR, and watch it get encrypted block by block. Then decrypt it and check that every byte comes back.</p>
+    <div class="hero-cta">
+        <button type="button" class="btn-primary sm" data-goto="encrypt">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+            <span class="btn-text">Start encrypting</span>
+        </button>
+        <button type="button" class="btn-ghost" data-scroll="#modes">How the modes differ</button>
+    </div>
+    <div class="hex-ticker" aria-hidden="true"><span id="hexTicker"></span></div>
+</section>
+
+<section class="workspace glass" id="workspace">
+    <div class="tabs" role="tablist" aria-label="Workspace">
+        <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="encrypt">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+            Encrypt
+        </button>
+        <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" data-tab="decrypt">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.5-2" /></svg>
+            Decrypt
+        </button>
+        <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" data-tab="compare">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 4v16" /></svg>
+            Compare modes
+        </button>
+        <span class="tab-indicator" aria-hidden="true"></span>
+    </div>
+
+    @* ======================= ENCRYPT ======================= *@
+    <div class="panel active" data-panel="encrypt" role="tabpanel">
+        <div class="panel-grid">
+            <div class="stage-col">
+                <div class="stage" id="encStage">
+                    <div class="dropzone" id="encDrop" tabindex="0" role="button" aria-label="Choose a plaintext image">
+                        <div class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4" /><path d="m6 10 6-6 6 6" /><path d="M4 20h16" /></svg></div>
+                        <strong>Drop a plaintext image here</strong>
+                        <span class="dz-sub">or click to browse &middot; PNG, JPG, BMP, GIF</span>
+                    </div>
+                    <div class="canvas-wrap">
+                        <canvas id="encCanvas" aria-label="Image being encrypted"></canvas>
+                        <div class="scanline"></div>
+                    </div>
+                    <span class="stage-tag" id="encTag">Plaintext</span>
+                    <div class="stage-hud"><span id="encCounter"></span></div>
+                    <input type="file" id="encFile" accept="image/*" hidden />
+                </div>
+                <div class="stage-bar">
+                    <span class="file-name" id="encFileName">No image selected</span>
+                    <button type="button" class="link-btn" id="encChange" hidden>Change image</button>
+                </div>
+                <div class="samples">
+                    <span>Project samples:</span>
+                    <button type="button" class="chip" data-sample="/samples/tux.png" data-name="tux.png"><img src="~/samples/tux.png" alt="" />Tux</button>
+                    <button type="button" class="chip" data-sample="/samples/alice.png" data-name="alice.png"><img src="~/samples/alice.png" alt="" />Alice</button>
+                </div>
+                <ol class="steps" id="encSteps">
+                    <li>Read raw pixels</li>
+                    <li>Generate AES key</li>
+                    <li>Encrypt blocks</li>
+                    <li>Render ciphertext</li>
+                </ol>
+            </div>
+
+            <div class="controls-col">
+                <div class="control-label">Mode</div>
+                <div class="mode-cards" role="radiogroup" aria-label="Encryption mode">
+                    @foreach (var m in modes)
+                    {
+                        <label class="mode-card">
+                            <input type="radio" name="encMode" value="@m.Name" checked="@(m.Name == "ECB")" />
+                            <span class="mc-head"><span class="mc-name">@m.Name</span><span class="mc-tag @m.Tone">@m.Tag</span></span>
+                            <span class="mc-desc">@m.Desc</span>
+                        </label>
+                    }
+                </div>
+
+                <div class="control-label">Key size</div>
+                <div class="segmented" role="radiogroup" aria-label="Key size">
+                    @foreach (var k in keySizes)
+                    {
+                        <label class="seg">
+                            <input type="radio" name="encKey" value="@k.Bits" checked="@(k.Bits == 256)" />
+                            <span class="seg-main">@k.Bits-bit</span>
+                            <span class="seg-sub">@k.Rounds rounds</span>
+                        </label>
+                    }
+                </div>
+
+                <button type="button" class="btn-primary" id="encBtn" disabled>
+                    <span class="spinner"></span>
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                    <span class="btn-text">Encrypt image</span>
+                </button>
+                <p class="micro">A fresh key is generated by the .NET AES library on every run. Pixels are encrypted raw (uncompressed), so you see exactly what the cipher does to them.</p>
+            </div>
+        </div>
+
+        <div class="result" id="encResult" hidden>
+            <div class="result-grid">
+                <div class="slider-col">
+                    <div class="compare-slider" id="encSlider" tabindex="0" role="slider" aria-label="Drag to compare plaintext and ciphertext" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+                        <img class="cs-bottom" id="encCipherImg" alt="Ciphertext drawn as an image" />
+                        <div class="cs-top"><img id="encPlainImg" alt="Plaintext image" /></div>
+                        <div class="cs-handle"><div class="cs-knob"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 7-5 5 5 5" /><path d="m15 7 5 5-5 5" /></svg></div></div>
+                        <span class="cs-label left">Plaintext</span>
+                        <span class="cs-label right" id="encCipherLabel">Ciphertext</span>
+                    </div>
+                    <p class="slider-hint">Drag the handle. The right side is the raw encrypted bytes drawn as pixels.</p>
+                </div>
+
+                <div class="result-side">
+                    <div class="stats">
+                        <div class="stat"><div class="stat-label">Mode</div><div class="stat-value" id="encStatMode">&ndash;</div></div>
+                        <div class="stat"><div class="stat-label">Key</div><div class="stat-value" id="encStatKey">&ndash;</div></div>
+                        <div class="stat"><div class="stat-label">Blocks encrypted</div><div class="stat-value" id="encStatBlocks">&ndash;</div></div>
+                        <div class="stat"><div class="stat-label">AES time</div><div class="stat-value" id="encStatTime">&ndash;</div></div>
+                    </div>
+
+                    <div class="leak" id="encLeak">
+                        <div class="leak-head"><span class="leak-title">Repeated ciphertext blocks</span><span class="meter-value">0%</span></div>
+                        <div class="meter"><div class="meter-fill"></div></div>
+                        <p class="meter-verdict"></p>
+                        <p class="leak-note" id="encPlainLeak"></p>
+                    </div>
+
+                    <div class="secrets">
+                        <div class="secret-row">
+                            <span class="secret-label">Key</span>
+                            <code class="secret-value" id="encKey"></code>
+                            <button type="button" class="icon-btn" data-copy="#encKey" aria-label="Copy key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h8" /></svg></button>
+                        </div>
+                        <div class="secret-row" id="encIvRow">
+                            <span class="secret-label" id="encIvLabel">IV</span>
+                            <code class="secret-value" id="encIv"></code>
+                            <button type="button" class="icon-btn" data-copy="#encIv" aria-label="Copy IV or nonce"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h8" /></svg></button>
+                        </div>
+                    </div>
+
+                    <div class="actions">
+                        <button type="button" class="btn-ghost" id="encDownload">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12" /><path d="m6 10 6 6 6-6" /><path d="M4 20h16" /></svg>
+                            Download .bin
+                        </button>
+                        <button type="button" class="btn-primary sm" id="encToDecrypt">
+                            <span class="btn-text">Decrypt this</span>
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* ======================= DECRYPT ======================= *@
+    <div class="panel" data-panel="decrypt" role="tabpanel">
+        <div class="panel-grid">
+            <div class="stage-col">
+                <div class="stage" id="decStage">
+                    <div class="dropzone" id="decDrop" tabindex="0" role="button" aria-label="Choose a ciphertext file">
+                        <div class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 14h6M9 17h4" /></svg></div>
+                        <strong>Drop the ciphertext .bin here</strong>
+                        <span class="dz-sub">the file you downloaded after encrypting &middot; or click to browse</span>
+                    </div>
+                    <div class="canvas-wrap">
+                        <canvas id="decCanvas" aria-label="Ciphertext being decrypted"></canvas>
+                        <div class="scanline"></div>
+                    </div>
+                    <span class="stage-tag" id="decTag">Ciphertext</span>
+                    <div class="stage-hud"><span id="decCounter"></span></div>
+                    <input type="file" id="decFile" accept=".bin,application/octet-stream" hidden />
+                </div>
+                <div class="stage-bar">
+                    <span class="file-name" id="decFileName">No ciphertext selected</span>
+                    <button type="button" class="link-btn" id="decChange" hidden>Change file</button>
+                </div>
+                <ol class="steps" id="decSteps">
+                    <li>Parse .bin header</li>
+                    <li>Load key &amp; IV</li>
+                    <li>Decrypt blocks</li>
+                    <li>Verify result</li>
+                </ol>
+            </div>
+
+            <div class="controls-col">
+                <div class="control-label">Mode</div>
+                <div class="mode-cards" role="radiogroup" aria-label="Decryption mode">
+                    @foreach (var m in modes)
+                    {
+                        <label class="mode-card">
+                            <input type="radio" name="decMode" value="@m.Name" checked="@(m.Name == "ECB")" />
+                            <span class="mc-head"><span class="mc-name">@m.Name</span><span class="mc-tag @m.Tone">@m.Tag</span></span>
+                            <span class="mc-desc">@m.Desc</span>
+                        </label>
+                    }
+                </div>
+
+                <div class="field">
+                    <label for="decKey">Key (hex)</label>
+                    <div class="input-wrap">
+                        <input type="text" class="input mono" id="decKey" autocomplete="off" spellcheck="false" placeholder="32, 48 or 64 hex characters" />
+                        <button type="button" class="icon-btn tall" id="decPaste" aria-label="Paste key from clipboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2" /><path d="M9 4h6v3H9z" /></svg></button>
+                    </div>
+                </div>
+
+                <div class="field collapsible" id="decIvField">
+                    <div class="collapse-inner">
+                        <label for="decIv" id="decIvLabel">IV (hex)</label>
+                        <input type="text" class="input mono" id="decIv" autocomplete="off" spellcheck="false" placeholder="32 hex characters" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label>Original image <span class="optional">optional &middot; for a byte-for-byte check</span></label>
+                    <div class="attach">
+                        <button type="button" class="btn-ghost sm" id="decAttach">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7L14 4.5a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7.5" /></svg>
+                            Attach
+                        </button>
+                        <span class="attach-name" id="decOrigName">None attached</span>
+                        <button type="button" class="icon-btn" id="decOrigClear" aria-label="Remove original image" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+                        <input type="file" id="decOrigFile" accept="image/*" hidden />
+                    </div>
+                </div>
+
+                <button type="button" class="btn-primary" id="decBtn" disabled>
+                    <span class="spinner"></span>
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.5-2" /></svg>
+                    <span class="btn-text">Decrypt</span>
+                </button>
+                <p class="micro">Tip: after encrypting, press <strong>Decrypt this</strong> and everything here fills in by itself.</p>
+            </div>
+        </div>
+
+        <div class="result" id="decResult" hidden>
+            <div class="verdict" id="decVerdict">
+                <div class="verdict-icon"></div>
+                <div class="verdict-text"><strong id="decVerdictTitle"></strong><span id="decVerdictSub"></span></div>
+            </div>
+            <div class="stats three">
+                <div class="stat"><div class="stat-label">Mode</div><div class="stat-value" id="decStatMode">&ndash;</div></div>
+                <div class="stat"><div class="stat-label">Image size</div><div class="stat-value" id="decStatSize">&ndash;</div></div>
+                <div class="stat"><div class="stat-label">AES time</div><div class="stat-value" id="decStatTime">&ndash;</div></div>
+            </div>
+        </div>
+    </div>
+
+    @* ======================= COMPARE ======================= *@
+    <div class="panel" data-panel="compare" role="tabpanel">
+        <p class="panel-intro">Encrypt the same image with all three modes under one key and put them side by side.</p>
+
+        <div class="compare-bar">
+            <div class="compare-source">
+                <div class="cmp-thumb-empty" id="cmpThumbEmpty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 16-5-5-9 9" /></svg></div>
+                <img id="cmpThumb" alt="" hidden />
+                <div>
+                    <div class="cmp-name" id="cmpSourceName">No image yet</div>
+                    <div class="cmp-hint" id="cmpSourceHint">Uses the Encrypt tab's image, or pick one:</div>
+                </div>
+            </div>
+            <div class="samples">
+                <button type="button" class="chip" data-sample="/samples/tux.png" data-name="tux.png" data-target="cmp"><img src="~/samples/tux.png" alt="" />Tux</button>
+                <button type="button" class="chip" data-sample="/samples/alice.png" data-name="alice.png" data-target="cmp"><img src="~/samples/alice.png" alt="" />Alice</button>
+                <button type="button" class="link-btn" id="cmpChoose">Choose file&hellip;</button>
+                <input type="file" id="cmpFile" accept="image/*" hidden />
+            </div>
+            <div class="segmented compact" role="radiogroup" aria-label="Key size">
+                @foreach (var k in keySizes)
+                {
+                    <label class="seg">
+                        <input type="radio" name="cmpKey" value="@k.Bits" checked="@(k.Bits == 256)" />
+                        <span class="seg-main">@k.Bits</span>
+                    </label>
+                }
+            </div>
+            <button type="button" class="btn-primary sm" id="cmpBtn" disabled>
+                <span class="spinner"></span>
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 4v16" /></svg>
+                <span class="btn-text">Run all three</span>
+            </button>
+        </div>
+
+        <div class="triptych" id="cmpGrid">
+            <article class="tri-card" data-mode="PLAIN">
+                <div class="tri-head"><span class="mc-name">Original</span><span class="mc-tag neutral">Plaintext</span></div>
+                <div class="tri-img"><span class="tri-empty">No image yet</span></div>
+                <div class="leak mini">
+                    <div class="leak-head"><span class="leak-title">Repeated blocks</span><span class="meter-value">&ndash;</span></div>
+                    <div class="meter"><div class="meter-fill"></div></div>
+                </div>
+                <div class="tri-foot">&nbsp;</div>
+            </article>
+            @foreach (var m in modes)
+            {
+                <article class="tri-card" data-mode="@m.Name">
+                    <div class="tri-head"><span class="mc-name">@m.Name</span><span class="mc-tag @m.Tone">@m.Tag</span></div>
+                    <div class="tri-img"><span class="tri-empty">Run the comparison</span></div>
+                    <div class="leak mini">
+                        <div class="leak-head"><span class="leak-title">Repeated blocks</span><span class="meter-value">&ndash;</span></div>
+                        <div class="meter"><div class="meter-fill"></div></div>
+                    </div>
+                    <div class="tri-foot">&nbsp;</div>
+                </article>
+            }
+        </div>
+        <p class="micro center" id="cmpKeyNote"></p>
+    </div>
+</section>
+
+<section class="explainer" id="modes">
+    <h2 class="section-title">Same pixels, three very different <span class="grad">ciphertexts</span></h2>
+    <p class="section-sub">The two left blocks below are identical plaintext. Watch what each mode turns them into.</p>
+    <div class="explain-grid">
+        <article class="explain-card glass">
+            <div class="mc-head"><span class="mc-name">ECB</span><span class="mc-tag warn">Leaks patterns</span></div>
+            <div class="ex-flow">
+                <div class="ex-row"><span class="blk a"></span><span class="blk a"></span><span class="blk b"></span></div>
+                <div class="ex-arrow"><span>E<sub>K</sub></span></div>
+                <div class="ex-row out"><span class="blk x"></span><span class="blk x"></span><span class="blk y"></span></div>
+            </div>
+            <code class="ex-formula">C<sub>i</sub> = E<sub>K</sub>(P<sub>i</sub>)</code>
+            <p>No chaining and no randomness, so equal plaintext blocks always become equal ciphertext blocks. That's why the penguin's outline survives encryption.</p>
+        </article>
+        <article class="explain-card glass">
+            <div class="mc-head"><span class="mc-name">CBC</span><span class="mc-tag ok">Hides patterns</span></div>
+            <div class="ex-flow">
+                <div class="ex-row"><span class="blk a"></span><span class="blk a"></span><span class="blk b"></span></div>
+                <div class="ex-arrow"><span>E<sub>K</sub></span></div>
+                <div class="ex-row out"><span class="blk x"></span><span class="blk z"></span><span class="blk w"></span></div>
+            </div>
+            <code class="ex-formula">C<sub>i</sub> = E<sub>K</sub>(P<sub>i</sub> &oplus; C<sub>i&minus;1</sub>), &nbsp;C<sub>0</sub> = IV</code>
+            <p>Every block depends on all the blocks before it and on a random IV, so repeated pixels never repeat in the ciphertext.</p>
+        </article>
+        <article class="explain-card glass">
+            <div class="mc-head"><span class="mc-name">CTR</span><span class="mc-tag ok">Hides patterns</span></div>
+            <div class="ex-flow">
+                <div class="ex-row"><span class="blk a"></span><span class="blk a"></span><span class="blk b"></span></div>
+                <div class="ex-arrow"><span>&oplus; E<sub>K</sub></span></div>
+                <div class="ex-row out"><span class="blk y"></span><span class="blk w"></span><span class="blk z"></span></div>
+            </div>
+            <code class="ex-formula">C<sub>i</sub> = P<sub>i</sub> &oplus; E<sub>K</sub>(N + i)</code>
+            <p>AES only ever encrypts the counter. The output is a keystream XORed with the pixels: no padding, and encrypting and decrypting are the same operation.</p>
+        </article>
+    </div>
+</section>
+
+@section Scripts {
+    <script src="~/js/app.js" asp-append-version="true"></script>
+}
